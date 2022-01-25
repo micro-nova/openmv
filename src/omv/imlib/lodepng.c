@@ -29,6 +29,8 @@ Rename this file to lodepng.cpp to use it for C++, or to lodepng.c to use it for
 */
 
 #include "lodepng.h"
+#include "imlib.h"
+#undef CRC
 
 #ifdef LODEPNG_COMPILE_DISK
 #include <limits.h> /* LONG_MAX */
@@ -2427,7 +2429,7 @@ unsigned lodepng_crc32(const unsigned char* data, size_t length);
 so LodePNGBitWriter and LodePNGBitReader can't be used for those. */
 
 static unsigned char readBitFromReversedStream(size_t* bitpointer, const unsigned char* bitstream) {
-  unsigned char result = (unsigned char)((bitstream[(*bitpointer) >> 3] >> (7 - ((*bitpointer) & 0x7))) & 1);
+  unsigned char result = (unsigned char)((bitstream[(*bitpointer) >> 3] >> ((*bitpointer) & 0x7)) & 1);
   ++(*bitpointer);
   return result;
 }
@@ -2445,7 +2447,7 @@ static unsigned readBitsFromReversedStream(size_t* bitpointer, const unsigned ch
 
 static void setBitOfReversedStream(size_t* bitpointer, unsigned char* bitstream, unsigned char bit) {
   /*the current bit in bitstream may be 0 or 1 for this to work*/
-  if(bit == 0) bitstream[(*bitpointer) >> 3u] &=  (unsigned char)(~(1u << (7u - ((*bitpointer) & 7u))));
+  if(bit == 0) bitstream[(*bitpointer) >> 3u] &=  (unsigned char)(~(1u << ((*bitpointer) & 7u)));
   else         bitstream[(*bitpointer) >> 3u] |=  (1u << (7u - ((*bitpointer) & 7u)));
   ++(*bitpointer);
 }
@@ -2630,6 +2632,7 @@ static unsigned checkColorValidity(LodePNGColorType colortype, unsigned bd) {
     case LCT_PALETTE:    if(!(bd == 1 || bd == 2 || bd == 4 || bd == 8            )) return 37; break;
     case LCT_GREY_ALPHA: if(!(                                 bd == 8 || bd == 16)) return 37; break;
     case LCT_RGBA:       if(!(                                 bd == 8 || bd == 16)) return 37; break;
+    case LCT_RGB565:     if(!(                                            bd == 16)) return 37; break;
     case LCT_MAX_OCTET_VALUE: return 31; /* invalid color type */
     default: return 31; /* invalid color type */
   }
@@ -2643,6 +2646,7 @@ static unsigned getNumColorChannels(LodePNGColorType colortype) {
     case LCT_PALETTE: return 1;
     case LCT_GREY_ALPHA: return 2;
     case LCT_RGBA: return 4;
+    case LCT_RGB565: return 1;
     case LCT_MAX_OCTET_VALUE: return 0; /* invalid color type */
     default: return 0; /*invalid color type*/
   }
@@ -3203,7 +3207,12 @@ static unsigned rgba8ToPixel(unsigned char* out, size_t i,
       out[i * 8 + 4] = out[i * 8 + 5] = b;
       out[i * 8 + 6] = out[i * 8 + 7] = a;
     }
+  } else if(mode->colortype == LCT_RGB565) {
+      unsigned short rgb565 = COLOR_R8_G8_B8_TO_RGB565(r, g, b);
+      out[i * 2 + 0] = rgb565 & 255;
+      out[i * 2 + 1] = (rgb565 >> 8) & 255;
   }
+
 
   return 0; /*no error*/
 }
@@ -3213,7 +3222,7 @@ static void rgba16ToPixel(unsigned char* out, size_t i,
                          const LodePNGColorMode* mode,
                          unsigned short r, unsigned short g, unsigned short b, unsigned short a) {
   if(mode->colortype == LCT_GREY) {
-    unsigned short gray = r; /*((unsigned)r + g + b) / 3u;*/
+    unsigned short gray = ((unsigned)r + g + b) / 3u;
     out[i * 2 + 0] = (gray >> 8) & 255;
     out[i * 2 + 1] = gray & 255;
   } else if(mode->colortype == LCT_RGB) {
@@ -3224,7 +3233,7 @@ static void rgba16ToPixel(unsigned char* out, size_t i,
     out[i * 6 + 4] = (b >> 8) & 255;
     out[i * 6 + 5] = b & 255;
   } else if(mode->colortype == LCT_GREY_ALPHA) {
-    unsigned short gray = r; /*((unsigned)r + g + b) / 3u;*/
+    unsigned short gray = ((unsigned)r + g + b) / 3u;
     out[i * 4 + 0] = (gray >> 8) & 255;
     out[i * 4 + 1] = gray & 255;
     out[i * 4 + 2] = (a >> 8) & 255;
@@ -3238,6 +3247,13 @@ static void rgba16ToPixel(unsigned char* out, size_t i,
     out[i * 8 + 5] = b & 255;
     out[i * 8 + 6] = (a >> 8) & 255;
     out[i * 8 + 7] = a & 255;
+  } else if(mode->colortype == LCT_RGB565) {
+    r = ((r >> 8) & 255);
+    g = ((g >> 8) & 255);
+    b = ((b >> 8) & 255);
+    unsigned short rgb565 = COLOR_R8_G8_B8_TO_RGB565(r, g, b);
+    out[i * 2 + 0] = rgb565 & 255;
+    out[i * 2 + 1] = (rgb565 >> 8) & 255;
   }
 }
 
@@ -3309,6 +3325,12 @@ static void getPixelColorRGBA8(unsigned char* r, unsigned char* g,
       *b = in[i * 8 + 4];
       *a = in[i * 8 + 6];
     }
+  } else if(mode->colortype == LCT_RGB565) {
+      unsigned short rgb565 = ((in[i * 2 + 1] << 8) | in[i * 2 + 0]);
+      *r = COLOR_RGB565_TO_R8(rgb565);
+      *g = COLOR_RGB565_TO_G8(rgb565);
+      *b = COLOR_RGB565_TO_B8(rgb565);
+      *a = 255;
   }
 }
 
@@ -3408,6 +3430,14 @@ static void getPixelColorsRGBA8(unsigned char* LODEPNG_RESTRICT buffer, size_t n
         buffer[3] = in[i * 8 + 6];
       }
     }
+  } else if(mode->colortype == LCT_RGB565) {
+    for(i = 0; i != numpixels; ++i, buffer += num_channels) {
+      unsigned short rgb565 = ((in[i * 2 + 1] << 8) | in[i * 2 + 0]);
+      buffer[0] = COLOR_RGB565_TO_R8(rgb565);
+      buffer[1] = COLOR_RGB565_TO_G8(rgb565);
+      buffer[2] = COLOR_RGB565_TO_B8(rgb565);
+      buffer[3] = 255;
+    }
   }
 }
 
@@ -3481,6 +3511,13 @@ static void getPixelColorsRGB8(unsigned char* LODEPNG_RESTRICT buffer, size_t nu
         buffer[2] = in[i * 8 + 4];
       }
     }
+  } else if(mode->colortype == LCT_RGB565) {
+    for(i = 0; i != numpixels; ++i, buffer += num_channels) {
+      unsigned short rgb565 = ((in[i * 2 + 1] << 8) | in[i * 2 + 0]);
+      buffer[0] = COLOR_RGB565_TO_R8(rgb565);
+      buffer[1] = COLOR_RGB565_TO_G8(rgb565);
+      buffer[2] = COLOR_RGB565_TO_B8(rgb565);
+    }
   }
 }
 
@@ -3509,6 +3546,11 @@ static void getPixelColorRGBA16(unsigned short* r, unsigned short* g, unsigned s
     *g = 256u * in[i * 8 + 2] + in[i * 8 + 3];
     *b = 256u * in[i * 8 + 4] + in[i * 8 + 5];
     *a = 256u * in[i * 8 + 6] + in[i * 8 + 7];
+  } else if(mode->colortype == LCT_RGB565) {
+      unsigned short rgb565 = ((in[i * 2 + 1] << 8) | in[i * 2 + 0]);
+      *r = COLOR_RGB565_TO_R8(rgb565);
+      *g = COLOR_RGB565_TO_G8(rgb565);
+      *b = COLOR_RGB565_TO_B8(rgb565);
   }
 }
 
@@ -4992,8 +5034,8 @@ unsigned lodepng_decode(unsigned char** out, unsigned* w, unsigned* h,
 
     /*TODO: check if this works according to the statement in the documentation: "The converter can convert
     from grayscale input color type, to 8-bit grayscale or grayscale with alpha"*/
-    if(!(state->info_raw.colortype == LCT_RGB || state->info_raw.colortype == LCT_RGBA)
-       && !(state->info_raw.bitdepth == 8)) {
+    if(!(state->info_raw.colortype == LCT_RGB || state->info_raw.colortype == LCT_RGBA
+                || state->info_raw.colortype == LCT_RGB565) && !(state->info_raw.bitdepth == 8)) {
       return 56; /*unsupported color mode conversion*/
     }
 

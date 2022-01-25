@@ -102,6 +102,7 @@ typedef enum LodePNGColorType {
   LCT_PALETTE = 3, /*palette: 1,2,4,8 bit*/
   LCT_GREY_ALPHA = 4, /*grayscale with alpha: 8,16 bit*/
   LCT_RGBA = 6, /*RGB with alpha: 8,16 bit*/
+  LCT_RGB565 = 7, /*RGB565*/
   /*LCT_MAX_OCTET_VALUE lets the compiler allow this enum to represent any invalid
   byte value from 0 to 255 that could be present in an invalid PNG file header. Do
   not use, compare with or set the name LCT_MAX_OCTET_VALUE, instead either use
